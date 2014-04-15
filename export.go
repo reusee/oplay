@@ -15,7 +15,7 @@ import (
 func busCallback(bus *C.GstBus, msg *C.GstMessage, data C.gpointer) C.gboolean {
 	if IsMessage(msg) {
 		messageChan := *((*chan *C.GstMessage)(unsafe.Pointer(data)))
-		messageChan <- msg
+		messageChan <- C.gst_message_copy(msg)
 	}
 	return C.gboolean(1)
 }
@@ -48,7 +48,6 @@ func closureMarshal(closure *C.GClosure, ret *C.GValue, nParams C.guint, params 
 		}
 		arguments = append(arguments, arg)
 	}
-	p("arguments %v\n", arguments)
 
 	// call
 	fValue.Call(arguments[:fType.NumIn()])

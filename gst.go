@@ -20,6 +20,10 @@ static inline GType gtype_get_fundamental(GType t) {
 	return G_TYPE_FUNDAMENTAL(t);
 }
 
+static inline GValue* gvalue_new() {
+	return (GValue*)malloc(sizeof(GValue));
+}
+
 static inline const gchar* gvalue_get_type_name(GValue *v) {
 	return G_VALUE_TYPE_NAME(v);
 }
@@ -34,7 +38,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -48,9 +51,11 @@ func NewElement(factory string, name string) (*C.GstElement, error) {
 	if element == nil {
 		return nil, errors.New(fmt.Sprintf("failed to create element %s:%s", factory, name))
 	}
-	runtime.SetFinalizer(element, func(e *C.GstElement) {
-		C.gst_object_unref(asGPtr(element))
-	})
+	/*
+		runtime.SetFinalizer(element, func(e *C.GstElement) {
+			C.gst_object_unref(asGPtr(element))
+		})
+	*/ //TODO
 	return element, nil
 }
 
@@ -112,18 +117,18 @@ func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
 // GValue
 
 func toGValue(v interface{}) *C.GValue {
-	var value C.GValue
+	value := C.gvalue_new()
 	switch reflect.TypeOf(v).Kind() {
 	case reflect.String:
-		C.g_value_init(&value, C.G_TYPE_STRING)
+		C.g_value_init(value, C.G_TYPE_STRING)
 		cStr := C.CString(v.(string))
 		defer C.free(unsafe.Pointer(cStr))
-		C.g_value_set_string(&value, (*C.gchar)(unsafe.Pointer(cStr)))
+		C.g_value_set_string(value, (*C.gchar)(unsafe.Pointer(cStr)))
 	default:
 		panic(fmt.Sprintf("unknown type %v", reflect.TypeOf(v).Kind()))
 		//TODO more types
 	}
-	return &value
+	return value
 }
 
 func fromGValue(v *C.GValue) (ret interface{}) {
