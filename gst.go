@@ -2,6 +2,32 @@ package main
 
 /*
 #include <gst/gst.h>
+#include <stdlib.h>
+
+extern void closureMarshal(GClosure*, GValue*, guint, GValue*, gpointer, gpointer);
+
+GClosure* new_closure(void *data) {
+	GClosure *closure = g_closure_new_simple(sizeof(GClosure), NULL);
+	g_closure_set_meta_marshal(closure, data, (GClosureMarshal)(closureMarshal));
+	return closure;
+}
+
+static inline GType gvalue_get_type(GValue *v) {
+	return G_VALUE_TYPE(v);
+}
+
+static inline GType gtype_get_fundamental(GType t) {
+	return G_TYPE_FUNDAMENTAL(t);
+}
+
+static inline const gchar* gvalue_get_type_name(GValue *v) {
+	return G_VALUE_TYPE_NAME(v);
+}
+
+static inline int is_message(GstMessage *msg) {
+	return GST_IS_MESSAGE(msg);
+}
+
 */
 import "C"
 import (
@@ -9,8 +35,11 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"sync"
 	"unsafe"
 )
+
+// Element
 
 func NewElement(factory string, name string) (*C.GstElement, error) {
 	cFactory := toGStr(factory)
@@ -25,21 +54,6 @@ func NewElement(factory string, name string) (*C.GstElement, error) {
 	return element, nil
 }
 
-func NewFactory(name string) (*C.GstElementFactory, error) {
-	factory := C.gst_element_factory_find(toGStr(name))
-	if factory == nil {
-		return nil, errors.New(fmt.Sprintf("failed to find factory %s", name))
-	}
-	return factory, nil
-}
-
-func AddToBin(bin interface{}, elements ...interface{}) {
-	cBin := asGstBin(bin)
-	for _, e := range elements {
-		C.gst_bin_add(cBin, asGstElem(e))
-	}
-}
-
 func ElementLink(elements ...interface{}) error {
 	for i := 0; i < len(elements)-1; i++ {
 		if C.gst_element_link(asGstElem(elements[i]), asGstElem(elements[i+1])) != C.gboolean(1) {
@@ -48,6 +62,92 @@ func ElementLink(elements ...interface{}) error {
 	}
 	return nil
 }
+
+// Factory
+
+func NewFactory(name string) (*C.GstElementFactory, error) {
+	factory := C.gst_element_factory_find(toGStr(name))
+	if factory == nil {
+		return nil, errors.New(fmt.Sprintf("failed to find factory %s", name))
+	}
+	return factory, nil
+}
+
+// Bin
+
+func BinAdd(bin interface{}, elements ...interface{}) {
+	cBin := asGstBin(bin)
+	for _, e := range elements {
+		C.gst_bin_add(cBin, asGstElem(e))
+	}
+}
+
+// Message
+
+func IsMessage(msg *C.GstMessage) bool {
+	return C.is_message(msg) == 1
+}
+
+// Object
+
+func ObjSet(obj *C.GObject, name string, value interface{}) {
+	C.g_object_set_property(obj, toGStr(name), toGValue(value))
+}
+
+var cbHolder []*interface{}
+var cbLocker sync.Mutex
+
+func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
+	cbp := &cb
+	cbLocker.Lock()
+	cbHolder = append(cbHolder, cbp)
+	cbLocker.Unlock()
+	closure := C.new_closure(unsafe.Pointer(cbp))
+	cSignal := (*C.gchar)(unsafe.Pointer(C.CString(signal)))
+	defer C.free(unsafe.Pointer(cSignal))
+	id := C.g_signal_connect_closure(asGPtr(obj), cSignal, closure, C.gboolean(0))
+	return id
+}
+
+// GValue
+
+func toGValue(v interface{}) *C.GValue {
+	var value C.GValue
+	switch reflect.TypeOf(v).Kind() {
+	case reflect.String:
+		C.g_value_init(&value, C.G_TYPE_STRING)
+		cStr := C.CString(v.(string))
+		defer C.free(unsafe.Pointer(cStr))
+		C.g_value_set_string(&value, (*C.gchar)(unsafe.Pointer(cStr)))
+	default:
+		panic(fmt.Sprintf("unknown type %v", reflect.TypeOf(v).Kind()))
+		//TODO more types
+	}
+	return &value
+}
+
+func fromGValue(v *C.GValue) (ret interface{}) {
+	valueType := C.gvalue_get_type(v)
+	fundamentalType := C.gtype_get_fundamental(valueType)
+	switch fundamentalType {
+	case C.G_TYPE_OBJECT:
+		ret = unsafe.Pointer(C.g_value_get_object(v))
+	default:
+		p("from type %s\n", fromGStr(C.g_type_name(fundamentalType)))
+		panic("FIXME") //TODO
+	}
+	return
+}
+
+func ValueGetType(v *C.GValue) C.GType {
+	return C.gvalue_get_type(v)
+}
+
+func ValueGetTypeName(v *C.GValue) string {
+	return fromGStr(C.gvalue_get_type_name(v))
+}
+
+// conversion
 
 func toGStr(s string) *C.gchar {
 	return (*C.gchar)(unsafe.Pointer(C.CString(s)))
@@ -63,6 +163,10 @@ func asGStr(s interface{}) *C.gchar {
 
 func asGPtr(i interface{}) C.gpointer {
 	return (C.gpointer)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
+}
+
+func asGObj(i interface{}) *C.GObject {
+	return (*C.GObject)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
 }
 
 func asGstObj(i interface{}) *C.GstObject {
