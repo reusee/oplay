@@ -47,7 +47,8 @@ func closureMarshal(closure *C.GClosure, ret *C.GValue, nParams C.guint, params 
 		var arg reflect.Value
 		switch fType.In(i).Kind() {
 		case reflect.Ptr:
-			arg = reflect.NewAt(fType.In(i), goValue.(unsafe.Pointer)).Elem()
+			p := goValue.(unsafe.Pointer)
+			arg = reflect.NewAt(fType.In(i), unsafe.Pointer(&p)).Elem()
 		default:
 			panic("FIXME") //TODO
 		}
@@ -56,4 +57,6 @@ func closureMarshal(closure *C.GClosure, ret *C.GValue, nParams C.guint, params 
 
 	// call
 	fValue.Call(arguments[:fType.NumIn()])
+
+	//TODO set return value
 }
