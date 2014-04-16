@@ -63,7 +63,7 @@ func play2() {
 				var err *C.GError
 				var debug *C.gchar
 				C.gst_message_parse_error(msg, &err, &debug)
-				p("Error: %s\n", fromGStr(err.message))
+				p("Error: %s\n%s\n", fromGStr(err.message), fromGStr(debug))
 				C.g_error_free(err)
 				C.g_free(asGPtr(debug))
 				C.g_main_loop_quit(loop)
