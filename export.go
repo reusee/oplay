@@ -60,3 +60,9 @@ func closureMarshal(closure *C.GClosure, ret *C.GValue, nParams C.guint, params 
 
 	//TODO set return value
 }
+
+//export tagForeachCb
+func tagForeachCb(list *C.GstTagList, tag *C.gchar, data C.gpointer) {
+	f := *((*func(*C.gchar))(unsafe.Pointer(data)))
+	f(tag)
+}

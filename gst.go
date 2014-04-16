@@ -38,6 +38,11 @@ guint add_bus_watch(GstBus *bus, void *data) {
 	return gst_bus_add_watch(bus, busCallback, data);
 }
 
+extern void tagForeachCb(const GstTagList*, const gchar*, gpointer);
+void tag_foreach(GstTagList *list, void *data) {
+	gst_tag_list_foreach(list, tagForeachCb, data);
+}
+
 */
 import "C"
 import (
@@ -113,6 +118,12 @@ func IsMessage(msg *C.GstMessage) bool {
 	return C.is_message(msg) == 1
 }
 
+// Tag
+
+func TagForeach(list *C.GstTagList, f func(*C.gchar)) {
+	C.tag_foreach(list, unsafe.Pointer(&f))
+}
+
 // Object
 
 func ObjSet(obj *C.GObject, name string, value interface{}) {
@@ -157,6 +168,10 @@ func fromGValue(v *C.GValue) (ret interface{}) {
 	switch fundamentalType {
 	case C.G_TYPE_OBJECT:
 		ret = unsafe.Pointer(C.g_value_get_object(v))
+	case C.G_TYPE_STRING:
+		ret = fromGStr(C.g_value_get_string(v))
+	case C.G_TYPE_UINT:
+		ret = int(C.g_value_get_uint(v))
 	default:
 		p("from type %s\n", fromGStr(C.g_type_name(fundamentalType)))
 		panic("FIXME") //TODO
