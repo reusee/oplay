@@ -3,6 +3,7 @@ package main
 /*
 #include <gst/gst.h>
 #include <stdlib.h>
+#cgo pkg-config: gstreamer-1.0
 
 extern void closureMarshal(GClosure*, GValue*, guint, GValue*, gpointer, gpointer);
 
@@ -32,6 +33,11 @@ static inline int is_message(GstMessage *msg) {
 	return GST_IS_MESSAGE(msg);
 }
 
+extern gboolean busCallback(GstBus*, GstMessage*, gpointer);
+guint add_bus_watch(GstBus *bus, void *data) {
+	return gst_bus_add_watch(bus, busCallback, data);
+}
+
 */
 import "C"
 import (
@@ -41,6 +47,10 @@ import (
 	"sync"
 	"unsafe"
 )
+
+func init() {
+	C.gst_init(nil, nil)
+}
 
 // Element
 
@@ -87,6 +97,16 @@ func BinAdd(bin interface{}, elements ...interface{}) {
 	}
 }
 
+// Pipeline
+
+func PipelineWatchBus(pipeline *C.GstPipeline) chan *C.GstMessage {
+	bus := C.gst_pipeline_get_bus(pipeline)
+	defer C.gst_object_unref(asGPtr(bus))
+	messages := make(chan *C.GstMessage)
+	C.add_bus_watch(bus, unsafe.Pointer(&messages))
+	return messages
+}
+
 // Message
 
 func IsMessage(msg *C.GstMessage) bool {
@@ -105,7 +125,7 @@ var cbLocker sync.Mutex
 func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
 	cbp := &cb
 	cbLocker.Lock()
-	cbHolder = append(cbHolder, cbp)
+	cbHolder = append(cbHolder, cbp) //TODO deref
 	cbLocker.Unlock()
 	closure := C.new_closure(unsafe.Pointer(cbp))
 	cSignal := (*C.gchar)(unsafe.Pointer(C.CString(signal)))

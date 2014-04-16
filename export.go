@@ -8,6 +8,7 @@ import "C"
 import (
 	"log"
 	"reflect"
+	"runtime"
 	"unsafe"
 )
 
@@ -15,7 +16,11 @@ import (
 func busCallback(bus *C.GstBus, msg *C.GstMessage, data C.gpointer) C.gboolean {
 	if IsMessage(msg) {
 		messageChan := *((*chan *C.GstMessage)(unsafe.Pointer(data)))
-		messageChan <- C.gst_message_copy(msg)
+		copy := C.gst_message_copy(msg)
+		runtime.SetFinalizer(copy, func(m *C.GstMessage) {
+			C.gst_message_unref(m)
+		})
+		messageChan <- copy
 	}
 	return C.gboolean(1)
 }
