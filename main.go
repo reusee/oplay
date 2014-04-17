@@ -7,7 +7,9 @@ import "C"
 import (
 	"log"
 	"os"
+	"reflect"
 	"time"
+	"unsafe"
 )
 
 func main() {
@@ -40,20 +42,37 @@ func probe() {
 	C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING)
 	messages := PipelineWatchBus(asGstPipeline(pipeline))
 
+	width, height := 640, 480
 	filtercaps := NewCapsSimple("video/x-raw",
 		"format", "RGB16",
-		"width", 1600,
-		"height", 1000,
+		"width", width,
+		"height", height,
 		"framerate", Fraction{25, 1})
 	ObjSet(asGObj(filter), "caps", filtercaps)
 	n := C.gst_caps_get_size(filtercaps)
-	structure := C.gst_caps_get_structure(filtercaps, n - 1)
+	structure := C.gst_caps_get_structure(filtercaps, n-1)
 	_ = structure
 	C.gst_caps_unref(filtercaps)
 
 	pad := C.gst_element_get_static_pad(src, toGStr("src"))
 	PadAddProbe(pad, C.GST_PAD_PROBE_TYPE_BUFFER, func(info *C.GstPadProbeInfo) C.GstPadProbeReturn {
-		p("here\n")
+		buffer := (*C.GstBuffer)(unsafe.Pointer(info.data))
+		buffer = asGstBuffer(C.gst_mini_object_make_writable(asGstMiniObject(buffer)))
+		var mapInfo C.GstMapInfo
+		C.gst_buffer_map(buffer, &mapInfo, C.GST_MAP_WRITE)
+		var ptr []C.guint16
+		header := (*reflect.SliceHeader)(unsafe.Pointer(&ptr))
+		header.Len = int(mapInfo.size / 2)
+		header.Cap = header.Len
+		header.Data = uintptr(unsafe.Pointer(mapInfo.data))
+		for y := 0; y < height; y++ {
+			for x := 0; x < width/2; x++ {
+				ptr[x], ptr[width-1-x] = ptr[width-1-x], ptr[x]
+			}
+			ptr = ptr[width:]
+		}
+		C.gst_buffer_unmap(buffer, &mapInfo)
+		info.data = asGPtr(buffer)
 		return C.GST_PAD_PROBE_OK
 	})
 	C.gst_object_unref(asGPtr(pad))

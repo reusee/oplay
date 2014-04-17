@@ -356,3 +356,11 @@ func asGstPipeline(i interface{}) *C.GstPipeline {
 func asGstCaps(i interface{}) *C.GstCaps {
 	return (*C.GstCaps)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
 }
+
+func asGstMiniObject(i interface{}) *C.GstMiniObject {
+	return (*C.GstMiniObject)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
+}
+
+func asGstBuffer(i interface{}) *C.GstBuffer {
+	return (*C.GstBuffer)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
+}
