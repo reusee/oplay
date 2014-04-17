@@ -11,6 +11,87 @@ import (
 )
 
 func main() {
+	probe()
+	//oggplayer()
+	//rtmp()
+}
+
+func probe() {
+	pipeline := C.gst_pipeline_new(toGStr("pipeline"))
+	src, err := NewElement("videotestsrc", "src")
+	if err != nil {
+		log.Fatal(err)
+	}
+	filter, err := NewElement("capsfilter", "filter")
+	if err != nil {
+		log.Fatal(err)
+	}
+	csp, err := NewElement("videoconvert", "csp")
+	if err != nil {
+		log.Fatal(err)
+	}
+	sink, err := NewElement("xvimagesink", "sink")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	BinAdd(pipeline, src, filter, csp, sink)
+	ElementLink(src, filter, csp, sink)
+	C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING)
+	messages := PipelineWatchBus(asGstPipeline(pipeline))
+
+	filtercaps := NewCapsSimple("video/x-raw",
+		"format", "RGB16",
+		"width", 1600,
+		"height", 1000,
+		"framerate", Fraction{25, 1})
+	ObjSet(asGObj(filter), "caps", filtercaps)
+	n := C.gst_caps_get_size(filtercaps)
+	structure := C.gst_caps_get_structure(filtercaps, n - 1)
+	_ = structure
+	C.gst_caps_unref(filtercaps)
+
+	go func() {
+		for msg := range messages {
+			MessageDump(msg)
+		}
+	}()
+
+	loop := C.g_main_loop_new(nil, C.gboolean(0))
+	C.g_main_loop_run(loop)
+}
+
+func rtmp() {
+	pipeline := C.gst_pipeline_new(toGStr("rtmp-player"))
+	_ = pipeline
+	source, err := NewElementFromUri(C.GST_URI_SRC, "rtmp://fms-base2.mitene.ad.jp/agqr/aandg1", "source")
+	if err != nil {
+		log.Fatal(err)
+	}
+	sink, err := NewElement("autoaudiosink", "sink")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	messages := PipelineWatchBus(asGstPipeline(pipeline))
+	BinAdd(pipeline, source, sink)
+	if err := ElementLink(source, sink); err != nil {
+		log.Fatal(err)
+	}
+	C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING)
+
+	go func() {
+		for msg := range messages {
+			MessageDump(msg)
+		}
+	}()
+
+	loop := C.g_main_loop_new(nil, C.gboolean(0))
+	C.g_main_loop_run(loop)
+
+}
+
+func oggplayer() {
 	pipeline := C.gst_pipeline_new(toGStr("audio-player"))
 	source, err := NewElement("filesrc", "file-source")
 	if err != nil {
@@ -47,57 +128,7 @@ func main() {
 
 	go func() {
 		for msg := range messages {
-			srcName := fromGStr(C.gst_object_get_name(msg.src))
-			switch msg._type {
-			case C.GST_MESSAGE_ERROR: // error
-				var err *C.GError
-				var debug *C.gchar
-				C.gst_message_parse_error(msg, &err, &debug)
-				p("Error of %s: %s\n%s\n", srcName, fromGStr(err.message), fromGStr(debug))
-				C.g_error_free(err)
-				C.g_free(asGPtr(debug))
-			case C.GST_MESSAGE_STATE_CHANGED: // state changed
-				var oldState, newState C.GstState
-				C.gst_message_parse_state_changed(msg, &oldState, &newState, nil)
-				p("State of %s: %s -> %s\n", srcName,
-					fromGStr(C.gst_element_state_get_name(oldState)),
-					fromGStr(C.gst_element_state_get_name(newState)))
-			case C.GST_MESSAGE_STREAM_STATUS: // stream status
-				var t C.GstStreamStatusType
-				var owner *C.GstElement
-				C.gst_message_parse_stream_status(msg, &t, &owner)
-				p("Stream status of %s: %d\n", srcName,
-					t)
-			case C.GST_MESSAGE_STREAM_START: // stream start
-				p("Stream start of %s\n", srcName)
-			case C.GST_MESSAGE_TAG: // tag
-				var tagList *C.GstTagList
-				C.gst_message_parse_tag(msg, &tagList)
-				p("Tag of %s\n", srcName)
-				TagForeach(tagList, func(tag *C.gchar) {
-					num := C.gst_tag_list_get_tag_size(tagList, tag)
-					for i := C.guint(0); i < num; i++ {
-						val := C.gst_tag_list_get_value_index(tagList, tag, i)
-						p("%s = %v\n", fromGStr(tag), fromGValue(val))
-					}
-				})
-				C.gst_tag_list_unref(tagList)
-			case C.GST_MESSAGE_ASYNC_DONE: // async done
-				C.gst_message_parse_async_done(msg, nil)
-				p("Async done of %s\n", srcName)
-			case C.GST_MESSAGE_NEW_CLOCK: // new clock
-				var clock *C.GstClock
-				C.gst_message_parse_new_clock(msg, &clock)
-				p("New clock of %s\n", srcName)
-			case C.GST_MESSAGE_RESET_TIME: // reset time
-				C.gst_message_parse_reset_time(msg, nil)
-				p("Reset time of %s\n", srcName)
-			default:
-				name := C.gst_message_type_get_name(msg._type)
-				p("message type %s\n", fromGStr(name))
-				panic("fixme")
-			}
-			C.gst_message_unref(msg)
+			MessageDump(msg)
 		}
 	}()
 

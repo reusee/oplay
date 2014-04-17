@@ -22,7 +22,7 @@ static inline GType gtype_get_fundamental(GType t) {
 }
 
 static inline GValue* gvalue_new() {
-	return (GValue*)malloc(sizeof(GValue));
+	return (GValue*)g_slice_alloc0(sizeof(GValue));
 }
 
 static inline const gchar* gvalue_get_type_name(GValue *v) {
@@ -49,6 +49,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -66,11 +67,22 @@ func NewElement(factory string, name string) (*C.GstElement, error) {
 	if element == nil {
 		return nil, errors.New(fmt.Sprintf("failed to create element %s:%s", factory, name))
 	}
-	/*
-		runtime.SetFinalizer(element, func(e *C.GstElement) {
-			C.gst_object_unref(asGPtr(element))
-		})
-	*/ //TODO
+	runtime.SetFinalizer(element, func(e *C.GstElement) {
+		C.gst_object_unref(asGPtr(element))
+	})
+	return element, nil
+}
+
+func NewElementFromUri(t C.GstURIType, uri, name string) (*C.GstElement, error) {
+	var err *C.GError
+	element := C.gst_element_make_from_uri(t, toGStr(uri), toGStr(name), &err)
+	if element == nil {
+		defer C.g_error_free(err)
+		return nil, errors.New(fmt.Sprintf("%s", err.message))
+	}
+	runtime.SetFinalizer(element, func(e *C.GstElement) {
+		C.gst_object_unref(asGPtr(element))
+	})
 	return element, nil
 }
 
@@ -118,16 +130,90 @@ func IsMessage(msg *C.GstMessage) bool {
 	return C.is_message(msg) == 1
 }
 
+func MessageDump(msg *C.GstMessage) {
+	srcName := fromGStr(C.gst_object_get_name(msg.src))
+	switch msg._type {
+	case C.GST_MESSAGE_ERROR: // error
+		var err *C.GError
+		var debug *C.gchar
+		C.gst_message_parse_error(msg, &err, &debug)
+		p("Error of %s: %s\n%s\n", srcName, fromGStr(err.message), fromGStr(debug))
+		C.g_error_free(err)
+		C.g_free(asGPtr(debug))
+	case C.GST_MESSAGE_STATE_CHANGED: // state changed
+		var oldState, newState C.GstState
+		C.gst_message_parse_state_changed(msg, &oldState, &newState, nil)
+		p("State of %s: %s -> %s\n", srcName,
+			fromGStr(C.gst_element_state_get_name(oldState)),
+			fromGStr(C.gst_element_state_get_name(newState)))
+	case C.GST_MESSAGE_STREAM_STATUS: // stream status
+		var t C.GstStreamStatusType
+		var owner *C.GstElement
+		C.gst_message_parse_stream_status(msg, &t, &owner)
+		p("Stream status of %s: %d\n", srcName,
+			t)
+	case C.GST_MESSAGE_STREAM_START: // stream start
+		p("Stream start of %s\n", srcName)
+	case C.GST_MESSAGE_TAG: // tag
+		var tagList *C.GstTagList
+		C.gst_message_parse_tag(msg, &tagList)
+		p("Tag of %s\n", srcName)
+		TagForeach(tagList, func(tag *C.gchar) {
+			num := C.gst_tag_list_get_tag_size(tagList, tag)
+			for i := C.guint(0); i < num; i++ {
+				val := C.gst_tag_list_get_value_index(tagList, tag, i)
+				p("%s = %v\n", fromGStr(tag), fromGValue(val))
+			}
+		})
+		C.gst_tag_list_unref(tagList)
+	case C.GST_MESSAGE_ASYNC_DONE: // async done
+		C.gst_message_parse_async_done(msg, nil)
+		p("Async done of %s\n", srcName)
+	case C.GST_MESSAGE_NEW_CLOCK: // new clock
+		var clock *C.GstClock
+		C.gst_message_parse_new_clock(msg, &clock)
+		p("New clock of %s\n", srcName)
+	case C.GST_MESSAGE_RESET_TIME: // reset time
+		C.gst_message_parse_reset_time(msg, nil)
+		p("Reset time of %s\n", srcName)
+	case C.GST_MESSAGE_EOS: // end of stream
+		p("Eos of %s\n", srcName)
+	case C.GST_MESSAGE_ELEMENT: // element
+		p("Element msg from %s\n", srcName)
+	default:
+		name := C.gst_message_type_get_name(msg._type)
+		p("message type %s\n", fromGStr(name))
+		panic("fixme")
+	}
+	C.gst_message_unref(msg)
+}
+
 // Tag
 
 func TagForeach(list *C.GstTagList, f func(*C.gchar)) {
 	C.tag_foreach(list, unsafe.Pointer(&f))
 }
 
+// Caps
+
+func NewCapsSimple(mediaType string, args ...interface{}) *C.GstCaps {
+	caps := C.gst_caps_new_empty_simple(C.CString(mediaType))
+	for i := 0; i < len(args); i += 2 {
+		name := C.CString(args[i].(string))
+		value := toGValue(args[i+1])
+		C.gst_caps_set_value(caps, name, value)
+	}
+	return caps
+}
+
 // Object
 
 func ObjSet(obj *C.GObject, name string, value interface{}) {
 	C.g_object_set_property(obj, toGStr(name), toGValue(value))
+}
+
+func ObjSetValue(obj *C.GObject, name string, value *C.GValue) {
+	C.g_object_set_property(obj, toGStr(name), value)
 }
 
 var cbHolder []*interface{}
@@ -147,6 +233,15 @@ func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
 
 // GValue
 
+type Fraction struct {
+	N int
+	D int
+}
+
+var (
+	gstCapsType = reflect.TypeOf(new(C.GstCaps))
+)
+
 func toGValue(v interface{}) *C.GValue {
 	value := C.gvalue_new()
 	switch reflect.TypeOf(v).Kind() {
@@ -155,9 +250,28 @@ func toGValue(v interface{}) *C.GValue {
 		cStr := C.CString(v.(string))
 		defer C.free(unsafe.Pointer(cStr))
 		C.g_value_set_string(value, (*C.gchar)(unsafe.Pointer(cStr)))
+	case reflect.Int:
+		C.g_value_init(value, C.G_TYPE_INT)
+		C.g_value_set_int(value, C.gint(v.(int)))
+	case reflect.Struct:
+		switch rv := v.(type) {
+		case Fraction:
+			C.g_value_init(value, C.gst_fraction_get_type())
+			C.gst_value_set_fraction(value, C.gint(rv.N), C.gint(rv.D))
+		default:
+			p("unknown struct type %v\n", v)
+			panic("fixme")
+		}
+	case reflect.Ptr:
+		switch reflect.TypeOf(v) {
+		case gstCapsType:
+			C.g_value_init(value, C.gst_caps_get_type())
+			C.gst_value_set_caps(value, v.(*C.GstCaps))
+		default:
+			panic(fmt.Sprintf("unknown type %v", v)) //TODO
+		}
 	default:
-		panic(fmt.Sprintf("unknown type %v", reflect.TypeOf(v).Kind()))
-		//TODO more types
+		panic(fmt.Sprintf("unknown type %v", v)) //TODO
 	}
 	return value
 }
@@ -223,4 +337,8 @@ func asGstBin(i interface{}) *C.GstBin {
 
 func asGstPipeline(i interface{}) *C.GstPipeline {
 	return (*C.GstPipeline)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
+}
+
+func asGstCaps(i interface{}) *C.GstCaps {
+	return (*C.GstCaps)(unsafe.Pointer(reflect.ValueOf(i).Pointer()))
 }
