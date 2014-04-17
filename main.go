@@ -51,6 +51,13 @@ func probe() {
 	_ = structure
 	C.gst_caps_unref(filtercaps)
 
+	pad := C.gst_element_get_static_pad(src, toGStr("src"))
+	PadAddProbe(pad, C.GST_PAD_PROBE_TYPE_BUFFER, func(info *C.GstPadProbeInfo) C.GstPadProbeReturn {
+		p("here\n")
+		return C.GST_PAD_PROBE_OK
+	})
+	C.gst_object_unref(asGPtr(pad))
+
 	go func() {
 		for msg := range messages {
 			MessageDump(msg)

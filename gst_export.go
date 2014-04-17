@@ -66,3 +66,9 @@ func tagForeachCb(list *C.GstTagList, tag *C.gchar, data C.gpointer) {
 	f := *((*func(*C.gchar))(unsafe.Pointer(data)))
 	f(tag)
 }
+
+//export padProbeCb
+func padProbeCb(pad *C.GstPad, info *C.GstPadProbeInfo, data C.gpointer) C.GstPadProbeReturn {
+	f := *((*func(*C.GstPadProbeInfo)C.GstPadProbeReturn)(unsafe.Pointer(data)))
+	return f(info)
+}

@@ -43,6 +43,11 @@ void tag_foreach(GstTagList *list, void *data) {
 	gst_tag_list_foreach(list, tagForeachCb, data);
 }
 
+extern GstPadProbeReturn padProbeCb(GstPad*, GstPadProbeInfo*, gpointer);
+void pad_add_probe(GstPad *pad, GstPadProbeType mask, void *data) {
+	gst_pad_add_probe(pad, mask, padProbeCb, data, NULL);
+}
+
 */
 import "C"
 import (
@@ -206,6 +211,15 @@ func NewCapsSimple(mediaType string, args ...interface{}) *C.GstCaps {
 	return caps
 }
 
+// Pad
+
+func PadAddProbe(pad *C.GstPad, mask C.GstPadProbeType, cb func(*C.GstPadProbeInfo) C.GstPadProbeReturn) {
+	refHolderLock.Lock()
+	refHolder = append(refHolder, &cb)
+	refHolderLock.Unlock()
+	C.pad_add_probe(pad, mask, unsafe.Pointer(&cb))
+}
+
 // Object
 
 func ObjSet(obj *C.GObject, name string, value interface{}) {
@@ -216,14 +230,14 @@ func ObjSetValue(obj *C.GObject, name string, value *C.GValue) {
 	C.g_object_set_property(obj, toGStr(name), value)
 }
 
-var cbHolder []*interface{}
-var cbLocker sync.Mutex
+var refHolder []interface{}
+var refHolderLock sync.Mutex
 
 func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
 	cbp := &cb
-	cbLocker.Lock()
-	cbHolder = append(cbHolder, cbp) //TODO deref
-	cbLocker.Unlock()
+	refHolderLock.Lock()
+	refHolder = append(refHolder, cbp) //TODO deref
+	refHolderLock.Unlock()
 	closure := C.new_closure(unsafe.Pointer(cbp))
 	cSignal := (*C.gchar)(unsafe.Pointer(C.CString(signal)))
 	defer C.free(unsafe.Pointer(cSignal))
