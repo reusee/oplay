@@ -22,7 +22,7 @@ func busCallback(bus *C.GstBus, msg *C.GstMessage, data C.gpointer) C.gboolean {
 		})
 		messageChan <- copy
 	}
-	return C.gboolean(1)
+	return True()
 }
 
 //export closureMarshal

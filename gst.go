@@ -5,6 +5,9 @@ package main
 #include <stdlib.h>
 #cgo pkg-config: gstreamer-1.0
 
+gboolean T = TRUE;
+gboolean F = FALSE;
+
 extern void closureMarshal(GClosure*, GValue*, guint, GValue*, gpointer, gpointer);
 
 GClosure* new_closure(void *data) {
@@ -63,6 +66,16 @@ func init() {
 	C.gst_init(nil, nil)
 }
 
+// boolean
+
+func True() C.gboolean {
+	return C.T
+}
+
+func False() C.gboolean {
+	return C.F
+}
+
 // Element
 
 func NewElement(factory string, name string) (*C.GstElement, error) {
@@ -93,7 +106,7 @@ func NewElementFromUri(t C.GstURIType, uri, name string) (*C.GstElement, error) 
 
 func ElementLink(elements ...interface{}) error {
 	for i := 0; i < len(elements)-1; i++ {
-		if C.gst_element_link(asGstElem(elements[i]), asGstElem(elements[i+1])) != C.gboolean(1) {
+		if C.gst_element_link(asGstElem(elements[i]), asGstElem(elements[i+1])) != True() {
 			return errors.New("link error")
 		}
 	}
@@ -135,56 +148,89 @@ func IsMessage(msg *C.GstMessage) bool {
 	return C.is_message(msg) == 1
 }
 
+func pMsg(src, t string, args ...interface{}) {
+	if len(args) > 0 {
+		p("%-16s %-16s %s\n", src, t, fmt.Sprintf(args[0].(string), args[1:]...))
+	} else {
+		p("%-16s %-16s\n", src, t)
+	}
+}
+
 func MessageDump(msg *C.GstMessage) {
 	srcName := fromGStr(C.gst_object_get_name(msg.src))
 	switch msg._type {
+	case C.GST_MESSAGE_UNKNOWN: // unknown
+		pMsg(srcName, "Unknown")
+	case C.GST_MESSAGE_EOS: // end of stream
+		pMsg(srcName, "Eos")
 	case C.GST_MESSAGE_ERROR: // error
 		var err *C.GError
 		var debug *C.gchar
 		C.gst_message_parse_error(msg, &err, &debug)
-		p("Error of %s: %s\n%s\n", srcName, fromGStr(err.message), fromGStr(debug))
+		pMsg(srcName, "Error", "%s %s", fromGStr(err.message), fromGStr(debug))
 		C.g_error_free(err)
 		C.g_free(asGPtr(debug))
-	case C.GST_MESSAGE_STATE_CHANGED: // state changed
-		var oldState, newState C.GstState
-		C.gst_message_parse_state_changed(msg, &oldState, &newState, nil)
-		p("State of %s: %s -> %s\n", srcName,
-			fromGStr(C.gst_element_state_get_name(oldState)),
-			fromGStr(C.gst_element_state_get_name(newState)))
-	case C.GST_MESSAGE_STREAM_STATUS: // stream status
-		var t C.GstStreamStatusType
-		var owner *C.GstElement
-		C.gst_message_parse_stream_status(msg, &t, &owner)
-		p("Stream status of %s: %d\n", srcName,
-			t)
-	case C.GST_MESSAGE_STREAM_START: // stream start
-		p("Stream start of %s\n", srcName)
+	//case C.GST_MESSAGE_WARNING: // warning
+	//case C.GST_MESSAGE_INFO: // info
 	case C.GST_MESSAGE_TAG: // tag
 		var tagList *C.GstTagList
 		C.gst_message_parse_tag(msg, &tagList)
-		p("Tag of %s\n", srcName)
+		pMsg(srcName, "Tag")
 		TagForeach(tagList, func(tag *C.gchar) {
 			num := C.gst_tag_list_get_tag_size(tagList, tag)
 			for i := C.guint(0); i < num; i++ {
 				val := C.gst_tag_list_get_value_index(tagList, tag, i)
-				p("%s = %v\n", fromGStr(tag), fromGValue(val))
+				pMsg(srcName, "Tag", "%s = %v", fromGStr(tag), fromGValue(val))
 			}
 		})
 		C.gst_tag_list_unref(tagList)
-	case C.GST_MESSAGE_ASYNC_DONE: // async done
-		C.gst_message_parse_async_done(msg, nil)
-		p("Async done of %s\n", srcName)
+	//case C.GST_MESSAGE_BUFFERING: // buffering
+	case C.GST_MESSAGE_STATE_CHANGED: // state changed
+		var oldState, newState C.GstState
+		C.gst_message_parse_state_changed(msg, &oldState, &newState, nil)
+		pMsg(srcName, "State", "%s -> %s",
+			fromGStr(C.gst_element_state_get_name(oldState)),
+			fromGStr(C.gst_element_state_get_name(newState)))
+	//case C.GST_MESSAGE_STATE_DIRTY: // state dirty
+	//case C.GST_MESSAGE_STEP_DONE: // step done
+	//case C.GST_MESSAGE_CLOCK_PROVIDE: // clock provide
+	//case C.GST_MESSAGE_CLOCK_LOST: // clock lost
 	case C.GST_MESSAGE_NEW_CLOCK: // new clock
 		var clock *C.GstClock
 		C.gst_message_parse_new_clock(msg, &clock)
-		p("New clock of %s\n", srcName)
+		pMsg(srcName, "New clock")
+	//case C.GST_MESSAGE_STRUCTURE_CHANGE: // structure change
+	case C.GST_MESSAGE_STREAM_STATUS: // stream status
+		var t C.GstStreamStatusType
+		var owner *C.GstElement
+		C.gst_message_parse_stream_status(msg, &t, &owner)
+		p(srcName, "Stream status", "%d", t)
+	//case C.GST_MESSAGE_APPLICATION: // application
+	case C.GST_MESSAGE_ELEMENT: // element
+		pMsg(srcName, "Element", "%v", msg)
+	//case C.GST_MESSAGE_SEGMENT_START: // segment start
+	//case C.GST_MESSAGE_SEGMENT_DONE: // segment done
+	case C.GST_MESSAGE_DURATION_CHANGED: // duration changed
+		pMsg(srcName, "Duration changed")
+	case C.GST_MESSAGE_LATENCY: // latency
+		pMsg(srcName, "Latency")
+	//case C.GST_MESSAGE_ASYNC_START: // async start
+	case C.GST_MESSAGE_ASYNC_DONE: // async done
+		C.gst_message_parse_async_done(msg, nil)
+		pMsg(srcName, "Async done")
+	//case C.GST_MESSAGE_REQUEST_STATE: // request state
+	//case C.GST_MESSAGE_STEP_START: // step start
+	//case C.GST_MESSAGE_QOS: // qos
+	//case C.GST_MESSAGE_PROGRESS: // progress
+	//case C.GST_MESSAGE_TOC: // toc
 	case C.GST_MESSAGE_RESET_TIME: // reset time
 		C.gst_message_parse_reset_time(msg, nil)
-		p("Reset time of %s\n", srcName)
-	case C.GST_MESSAGE_EOS: // end of stream
-		p("Eos of %s\n", srcName)
-	case C.GST_MESSAGE_ELEMENT: // element
-		p("Element msg from %s\n", srcName)
+		pMsg(srcName, "Reset time")
+	case C.GST_MESSAGE_STREAM_START: // stream start
+		pMsg(srcName, "Stream start")
+	//case C.GST_MESSAGE_NEED_CONTEXT: // need context
+	//case C.GST_MESSAGE_HAVE_CONTEXT: // have context
+	//case C.GST_MESSAGE_ANY: // any
 	default:
 		name := C.gst_message_type_get_name(msg._type)
 		p("message type %s\n", fromGStr(name))
@@ -226,10 +272,6 @@ func ObjSet(obj *C.GObject, name string, value interface{}) {
 	C.g_object_set_property(obj, toGStr(name), toGValue(value))
 }
 
-func ObjSetValue(obj *C.GObject, name string, value *C.GValue) {
-	C.g_object_set_property(obj, toGStr(name), value)
-}
-
 var refHolder []interface{}
 var refHolderLock sync.Mutex
 
@@ -241,7 +283,7 @@ func ObjConnect(obj *C.GObject, signal string, cb interface{}) C.gulong {
 	closure := C.new_closure(unsafe.Pointer(cbp))
 	cSignal := (*C.gchar)(unsafe.Pointer(C.CString(signal)))
 	defer C.free(unsafe.Pointer(cSignal))
-	id := C.g_signal_connect_closure(asGPtr(obj), cSignal, closure, C.gboolean(0))
+	id := C.g_signal_connect_closure(asGPtr(obj), cSignal, closure, False())
 	return id
 }
 
@@ -300,8 +342,12 @@ func fromGValue(v *C.GValue) (ret interface{}) {
 		ret = fromGStr(C.g_value_get_string(v))
 	case C.G_TYPE_UINT:
 		ret = int(C.g_value_get_uint(v))
+	case C.G_TYPE_BOXED:
+		ret = unsafe.Pointer(C.g_value_get_boxed(v))
+	case C.G_TYPE_BOOLEAN:
+		ret = C.g_value_get_boolean(v) == True()
 	default:
-		p("from type %s\n", fromGStr(C.g_type_name(fundamentalType)))
+		p("from type %s %T\n", fromGStr(C.g_type_name(fundamentalType)), v)
 		panic("FIXME") //TODO
 	}
 	return

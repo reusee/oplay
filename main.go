@@ -7,17 +7,99 @@ import "C"
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"time"
 	"unsafe"
 )
 
 func main() {
-	probe()
+	playbin()
+	//ranged()
+	//probe()
 	//oggplayer()
-	//rtmp()
 }
 
+// playbin
+func playbin() {
+	pipeline, err := NewElement("playbin", "playbin")
+	if err != nil {
+		log.Fatal(err)
+	}
+	uri := os.Args[1]
+	if !strings.Contains(uri, "://") {
+		uri, err = filepath.Abs(uri)
+		if err != nil {
+			log.Fatal(err)
+		}
+		uri = "file://" + uri
+	}
+	ObjSet(asGObj(pipeline), "uri", uri)
+
+	messages := PipelineWatchBus(asGstPipeline(pipeline))
+	go func() {
+		for msg := range messages {
+			MessageDump(msg)
+		}
+	}()
+
+	C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING)
+
+	loop := C.g_main_loop_new(nil, False())
+	C.g_main_loop_run(loop)
+}
+
+// ranged playing
+func ranged() {
+	pipeline := C.gst_pipeline_new(toGStr("pipeline"))
+	src, err := NewElement("uridecodebin", "src")
+	if err != nil {
+		log.Fatal(err)
+	}
+	csp, err := NewElement("videoconvert", "csp")
+	if err != nil {
+		log.Fatal(err)
+	}
+	vs, err := NewElement("videoscale", "vs")
+	if err != nil {
+		log.Fatal(err)
+	}
+	sink, err := NewElement("autovideosink", "sink")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ObjSet(asGObj(src), "uri", os.Args[1])
+	BinAdd(pipeline, src, csp, vs, sink)
+	ElementLink(csp, vs, sink)
+	//TODO sinkpad :=
+
+	ObjConnect(asGObj(src), "pad-added", func(e *C.GstElement, pad *C.GstPad) {
+		p("====\n")
+		PadAddProbe(pad, C.GST_PAD_PROBE_TYPE_BLOCK_DOWNSTREAM, func(info *C.GstPadProbeInfo) C.GstPadProbeReturn {
+			p("blocked\n")
+			return C.GST_PAD_PROBE_OK
+		})
+		//C.gst_pad_link(pad, sinkpad)
+	})
+	ObjConnect(asGObj(src), "no-more-pads", func(e *C.GstElement) {
+	})
+
+	C.gst_element_set_state(pipeline, C.GST_STATE_PAUSED)
+
+	messages := PipelineWatchBus(asGstPipeline(pipeline))
+	go func() {
+		for msg := range messages {
+			MessageDump(msg)
+		}
+	}()
+
+	loop := C.g_main_loop_new(nil, False())
+	C.g_main_loop_run(loop)
+}
+
+// pad probe
 func probe() {
 	pipeline := C.gst_pipeline_new(toGStr("pipeline"))
 	src, err := NewElement("videotestsrc", "src")
@@ -83,38 +165,8 @@ func probe() {
 		}
 	}()
 
-	loop := C.g_main_loop_new(nil, C.gboolean(0))
+	loop := C.g_main_loop_new(nil, False())
 	C.g_main_loop_run(loop)
-}
-
-func rtmp() {
-	pipeline := C.gst_pipeline_new(toGStr("rtmp-player"))
-	_ = pipeline
-	source, err := NewElementFromUri(C.GST_URI_SRC, "rtmp://fms-base2.mitene.ad.jp/agqr/aandg1", "source")
-	if err != nil {
-		log.Fatal(err)
-	}
-	sink, err := NewElement("autoaudiosink", "sink")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	messages := PipelineWatchBus(asGstPipeline(pipeline))
-	BinAdd(pipeline, source, sink)
-	if err := ElementLink(source, sink); err != nil {
-		log.Fatal(err)
-	}
-	C.gst_element_set_state(pipeline, C.GST_STATE_PLAYING)
-
-	go func() {
-		for msg := range messages {
-			MessageDump(msg)
-		}
-	}()
-
-	loop := C.g_main_loop_new(nil, C.gboolean(0))
-	C.g_main_loop_run(loop)
-
 }
 
 func oggplayer() {
@@ -172,6 +224,6 @@ func oggplayer() {
 		}
 	}()
 
-	loop := C.g_main_loop_new(nil, C.gboolean(0))
+	loop := C.g_main_loop_new(nil, False())
 	C.g_main_loop_run(loop)
 }
