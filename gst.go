@@ -204,7 +204,7 @@ func MessageDump(msg *C.GstMessage) {
 		var t C.GstStreamStatusType
 		var owner *C.GstElement
 		C.gst_message_parse_stream_status(msg, &t, &owner)
-		p(srcName, "Stream status", "%d", t)
+		pMsg(srcName, "Stream status", "%d", t)
 	//case C.GST_MESSAGE_APPLICATION: // application
 	case C.GST_MESSAGE_ELEMENT: // element
 		pMsg(srcName, "Element", "%v", msg)
@@ -316,7 +316,7 @@ func toGValue(v interface{}) *C.GValue {
 			C.gst_value_set_fraction(value, C.gint(rv.N), C.gint(rv.D))
 		default:
 			p("unknown struct type %v\n", v)
-			panic("fixme")
+			panic("fixme") //TODO
 		}
 	case reflect.Ptr:
 		switch reflect.TypeOf(v) {
